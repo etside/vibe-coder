@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vibe Coder</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: #0a0a0f;
+    color: #e0e0ff;
+    height: 100vh;
+    display: grid;
+    grid-template-rows: auto 1fr;
+    overflow: hidden;
+  }
+
+  header {
+    padding: 12px 20px;
+    background: linear-gradient(135deg, #1a0a2e, #0d1b2a);
+    border-bottom: 1px solid #2a1a4e;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  header h1 {
+    font-size: 1.2rem;
+    background: linear-gradient(90deg, #a78bfa, #38bdf8);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-weight: 700;
+    letter-spacing: 1px;
+  }
+
+  .main {
+    display: grid;
+    grid-template-columns: 360px 1fr;
+    overflow: hidden;
+  }
+
+  .sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+    background: #0d0d1a;
+    border-right: 1px solid #1e1e3a;
+    overflow-y: auto;
+  }
+
+  textarea {
+    width: 100%;
+    height: 140px;
+    background: #12122a;
+    border: 1px solid #2a2a5a;
+    border-radius: 8px;
+    color: #e0e0ff;
+    padding: 10px;
+    font-size: 0.9rem;
+    resize: vertical;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  textarea:focus { border-color: #7c3aed; }
+
+  .btn {
+    padding: 10px 16px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 600;
+    transition: opacity 0.2s, transform 0.1s;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .btn-generate {
+    background: linear-gradient(135deg, #7c3aed, #2563eb);
+    color: #fff;
+  }
+
+  .btn-export {
+    background: linear-gradient(135deg, #059669, #0891b2);
+    color: #fff;
+  }
+
+  .btn-clear {
+    background: #1e1e3a;
+    color: #a0a0c0;
+    border: 1px solid #2a2a5a;
+  }
+
+  #status {
+    font-size: 0.78rem;
+    color: #7c7ca0;
+    min-height: 18px;
+    padding: 2px 0;
+  }
+  #status.active { color: #a78bfa; }
+  #status.error { color: #f87171; }
+  #status.success { color: #34d399; }
+
+  .code-view {
+    flex: 1;
+    background: #0a0a18;
+    border: 1px solid #1e1e3a;
+    border-radius: 8px;
+    padding: 10px;
+    font-family: 'Fira Code', monospace;
+    font-size: 0.72rem;
+    color: #7dd3fc;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 260px;
+  }
+
+  .preview-pane {
+    position: relative;
+    background: #000;
+  }
+
+  iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+    display: block;
+  }
+
+  .preview-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #0a0a0f;
+    color: #3a3a6a;
+    font-size: 1.1rem;
+    pointer-events: none;
+    transition: opacity 0.4s;
+  }
+  .preview-overlay.hidden { opacity: 0; }
+
+  .spinner {
+    width: 32px; height: 32px;
+    border: 3px solid #2a2a5a;
+    border-top-color: #7c3aed;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    display: none;
+  }
+  .spinner.active { display: block; }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  label { font-size: 0.8rem; color: #7c7ca0; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>⚡ Vibe Coder</h1>
+  <span style="font-size:0.75rem;color:#4a4a7a;">Kimi K2 · Animated Website Builder</span>
+</header>
+
+<div class="main">
+  <div class="sidebar">
+    <label>Describe your website</label>
+    <textarea id="prompt" placeholder="e.g. A futuristic portfolio with particle background, neon glow cards, smooth scroll animations, and a 3D rotating logo..."></textarea>
+
+    <button class="btn btn-generate" id="btnGen" onclick="generate()">✨ Generate</button>
+
+    <div id="status">Ready</div>
+    <div class="spinner" id="spinner"></div>
+
+    <label>Live Code Preview</label>
+    <div class="code-view" id="codeView"></div>
+
+    <button class="btn btn-export" id="btnExport" onclick="exportSite()" disabled>💾 Export to ~/Music</button>
+    <button class="btn btn-clear" onclick="clearAll()">✕ Clear</button>
+  </div>
+
+  <div class="preview-pane">
+    <div class="preview-overlay" id="overlay">✦ Your website will appear here</div>
+    <iframe id="preview"></iframe>
+  </div>
+</div>
+
+<script>
+  const ws = new WebSocket(`ws://${location.host}`);
+  let html = '';
+  let streaming = false;
+
+  const $ = id => document.getElementById(id);
+  const setStatus = (msg, cls = '') => {
+    const el = $('status');
+    el.textContent = msg;
+    el.className = cls;
+  };
+
+  ws.onmessage = ({ data }) => {
+    const msg = JSON.parse(data);
+
+    if (msg.type === 'thinking') {
+      setStatus(`🧠 Thinking… (${msg.count} tokens)`, 'active');
+    }
+
+    if (msg.type === 'chunk') {
+      html += msg.chunk;
+      $('codeView').textContent = html.slice(-2000);
+      $('codeView').scrollTop = $('codeView').scrollHeight;
+      if (html.length < 200) setStatus('✍️ Writing HTML…', 'active');
+    }
+
+    if (msg.type === 'done') {
+      streaming = false;
+      // strip markdown fences if model wrapped output
+      html = html.replace(/^```(?:html)?\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+      $('spinner').classList.remove('active');
+      $('btnGen').disabled = false;
+      $('btnExport').disabled = false;
+      setStatus(`✅ Done · ${html.length} chars`, 'success');
+      renderPreview();
+    }
+
+    if (msg.type === 'error') {
+      streaming = false;
+      $('spinner').classList.remove('active');
+      $('btnGen').disabled = false;
+      setStatus('❌ ' + msg.message, 'error');
+    }
+
+    if (msg.type === 'exported') {
+      setStatus('💾 Exported → ' + msg.file, 'success');
+    }
+  };
+
+  function renderPreview() {
+    const iframe = $('preview');
+    const overlay = $('overlay');
+    iframe.srcdoc = html;
+    overlay.classList.add('hidden');
+  }
+
+  function generate() {
+    const prompt = $('prompt').value.trim();
+    if (!prompt || streaming) return;
+    html = '';
+    streaming = true;
+    $('codeView').textContent = '';
+    $('btnGen').disabled = true;
+    $('btnExport').disabled = true;
+    $('overlay').classList.remove('hidden');
+    $('spinner').classList.add('active');
+    setStatus('Generating…', 'active');
+    ws.send(JSON.stringify({ type: 'generate', prompt }));
+  }
+
+  function exportSite() {
+    if (!html) return;
+    const filename = `vibe-${Date.now()}.html`;
+    ws.send(JSON.stringify({ type: 'export', filename, html }));
+    setStatus('Exporting…', 'active');
+  }
+
+  function clearAll() {
+    html = '';
+    $('codeView').textContent = '';
+    $('prompt').value = '';
+    $('preview').srcdoc = '';
+    $('overlay').classList.remove('hidden');
+    $('btnExport').disabled = true;
+    setStatus('Ready');
+  }
+
+  $('prompt').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && e.ctrlKey) generate();
+  });
+</script>
+</body>
+</html>
